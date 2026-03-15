@@ -5,7 +5,7 @@ import { workspaceAtom } from '../store/appStore'
 import { buildWorkspace } from '../services/workspaceBuilder'
 
 vi.mock('../services/aiService', () => ({
-  explainNode: async () => '这是由测试桩返回的讲解内容。',
+  streamExplainNode: async () => '这是由测试桩返回的讲解内容。',
 }))
 
 vi.mock('react-pdf', () => ({

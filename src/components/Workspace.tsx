@@ -41,11 +41,11 @@ export function Workspace() {
     <main className="workspace-shell">
       <header className="workspace-shell__topbar">
         <div>
-          <span className="eyebrow">学习工作台</span>
-          <h1>左图 · 中阅读器 · 右讲解区</h1>
+          <span className="eyebrow">当前学习会话</span>
+          <h1>系统化深度学习工作台</h1>
         </div>
         <button className="ghost-button" type="button" onClick={returnHome}>
-          返回首页
+          退出工作台
         </button>
       </header>
 

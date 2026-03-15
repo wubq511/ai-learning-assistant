@@ -1,5 +1,11 @@
 import { atom } from 'jotai'
-import type { ConversationMessage, ConversationThread, KnowledgeMapMode, WorkspaceModel } from '../types/workspace'
+import type {
+  ConversationMessage,
+  ConversationThread,
+  KnowledgeMapMode,
+  WorkspaceModel,
+  WorkspaceSummary,
+} from '../types/workspace'
 
 export type Screen = 'home' | 'workspace'
 
@@ -7,6 +13,7 @@ export const screenAtom = atom<Screen>('home')
 export const knowledgeMapModeAtom = atom<KnowledgeMapMode>('hierarchy')
 export const appInfoAtom = atom<{ name: string; version: string; platform: string } | null>(null)
 export const workspaceAtom = atom<WorkspaceModel | null>(null)
+export const workspaceHistoryAtom = atom<WorkspaceSummary[]>([])
 
 export const selectedNodeAtom = atom((get) => {
   const workspace = get(workspaceAtom)
@@ -47,8 +54,21 @@ function updateWorkspace(
     return null
   }
 
-  return updater(workspace)
+  const nextWorkspace = updater(workspace)
+
+  return {
+    ...nextWorkspace,
+    updatedAt: new Date().toISOString(),
+  }
 }
+
+export const setWorkspaceAtom = atom(null, (_get, set, workspace: WorkspaceModel | null) => {
+  set(workspaceAtom, workspace)
+})
+
+export const setWorkspaceHistoryAtom = atom(null, (_get, set, history: WorkspaceSummary[]) => {
+  set(workspaceHistoryAtom, history)
+})
 
 export const selectNodeAtom = atom(null, (get, set, nodeId: string) => {
   const workspace = get(workspaceAtom)
@@ -152,6 +172,46 @@ export const appendConversationMessageAtom = atom(
             ...existingThread,
             error: '',
             messages: [...existingThread.messages, payload.message],
+          },
+        },
+      }
+    })
+
+    if (nextWorkspace) {
+      set(workspaceAtom, nextWorkspace)
+    }
+  },
+)
+
+export const upsertConversationMessageAtom = atom(
+  null,
+  (get, set, payload: { nodeId: string; message: ConversationMessage }) => {
+    const workspace = get(workspaceAtom)
+    const nextWorkspace = updateWorkspace(workspace, (currentWorkspace) => {
+      const existingThread = currentWorkspace.conversations[payload.nodeId] ?? {
+        nodeId: payload.nodeId,
+        status: 'idle' as const,
+        error: '',
+        messages: [],
+      }
+
+      const existingIndex = existingThread.messages.findIndex((message) => message.id === payload.message.id)
+      const nextMessages = [...existingThread.messages]
+
+      if (existingIndex >= 0) {
+        nextMessages[existingIndex] = payload.message
+      } else {
+        nextMessages.push(payload.message)
+      }
+
+      return {
+        ...currentWorkspace,
+        conversations: {
+          ...currentWorkspace.conversations,
+          [payload.nodeId]: {
+            ...existingThread,
+            error: '',
+            messages: nextMessages,
           },
         },
       }

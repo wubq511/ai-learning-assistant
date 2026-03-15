@@ -1,6 +1,7 @@
 import { useAtomValue, useSetAtom } from 'jotai'
 import { Suspense, lazy, useEffect } from 'react'
 import { Home } from './components/Home'
+import { useWorkspacePersistence } from './hooks/useWorkspacePersistence'
 import { getLearningAssistantBridge } from './services/learningAssistantBridge'
 import { appInfoAtom, screenAtom } from './store/appStore'
 
@@ -13,6 +14,8 @@ function App() {
   const screen = useAtomValue(screenAtom)
   const appInfo = useAtomValue(appInfoAtom)
   const setAppInfo = useSetAtom(appInfoAtom)
+
+  useWorkspacePersistence()
 
   useEffect(() => {
     let cancelled = false
