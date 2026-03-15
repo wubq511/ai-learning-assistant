@@ -71,4 +71,20 @@ describe('buildWorkspace', () => {
     expect(labels).toContain('递进')
     expect(labels.some((label) => label === '前置' || label === '证明' || label === '应用' || label === '关联' || label === '并列')).toBe(true)
   })
+
+  it('creates unique workspace ids for repeated sessions with the same content', () => {
+    const firstWorkspace = buildWorkspace({
+      sourceType: 'topic',
+      title: '牛顿第二定律',
+      sourceText: '定义：牛顿第二定律描述合外力、质量与加速度的关系。',
+    })
+
+    const secondWorkspace = buildWorkspace({
+      sourceType: 'topic',
+      title: '牛顿第二定律',
+      sourceText: '定义：牛顿第二定律描述合外力、质量与加速度的关系。',
+    })
+
+    expect(firstWorkspace.id).not.toBe(secondWorkspace.id)
+  })
 })

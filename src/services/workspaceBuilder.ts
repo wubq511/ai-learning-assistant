@@ -59,6 +59,10 @@ function createNodeId(prefix: string, index: number, title: string) {
   return `${prefix}-${index + 1}${slug ? `-${slug}` : ''}`
 }
 
+function createWorkspaceId(sourceType: IngestionInput['sourceType']) {
+  return `${sourceType}-workspace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 function isGenericHeadingLabel(text: string) {
   return /^(定义|定理|性质|例题|证明|推论|应用|方法|总结|注意|公式|结论)$/u.test(text.trim())
 }
@@ -350,7 +354,7 @@ export function buildWorkspace(input: IngestionInput): WorkspaceModel {
   const selectedNodeId = nodes[0]?.id ?? ''
 
   return {
-    id: `${input.sourceType}-${selectedNodeId || 'workspace'}`,
+    id: createWorkspaceId(input.sourceType),
     createdAt: timestamp,
     updatedAt: timestamp,
     sourceType: input.sourceType,
