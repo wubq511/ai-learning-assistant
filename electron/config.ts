@@ -8,6 +8,11 @@ export interface AppConfig {
   model: string
 }
 
+function pickString(value: string | undefined) {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : undefined
+}
+
 const DEFAULT_CONFIG: AppConfig = {
   apiKey: '',
   baseURL: '',
@@ -47,13 +52,16 @@ export async function writeAppConfig(nextConfig: Partial<AppConfig>): Promise<Ap
   return mergedConfig
 }
 
-export async function resolveAiConfig() {
+export async function resolveAiConfig(override?: Partial<AppConfig>) {
   const storedConfig = await readAppConfig()
+  const apiKey = pickString(override?.apiKey) ?? process.env.OPENAI_API_KEY ?? storedConfig.apiKey
+  const baseURL = pickString(override?.baseURL) ?? process.env.OPENAI_BASE_URL ?? storedConfig.baseURL
+  const model = pickString(override?.model) ?? process.env.OPENAI_MODEL ?? storedConfig.model
 
   return {
-    apiKey: process.env.OPENAI_API_KEY || storedConfig.apiKey,
-    baseURL: process.env.OPENAI_BASE_URL || storedConfig.baseURL,
-    model: process.env.OPENAI_MODEL || storedConfig.model,
-    configured: Boolean(process.env.OPENAI_API_KEY || storedConfig.apiKey),
+    apiKey,
+    baseURL,
+    model,
+    configured: Boolean(apiKey),
   }
 }

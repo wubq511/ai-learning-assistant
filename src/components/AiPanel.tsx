@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom } from 'jotai'
 import { useEffect, useCallback, useMemo, useState } from 'react'
-import { explainNode } from '../services/aiService'
+import { streamExplainNode } from '../services/aiService'
 import {
   addStudyNoteAtom,
   appendConversationMessageAtom,
@@ -9,6 +9,7 @@ import {
   selectedNodeAtom,
   selectedNodeNotesAtom,
   setConversationStatusAtom,
+  upsertConversationMessageAtom,
   workspaceAtom,
 } from '../store/appStore'
 
@@ -33,6 +34,7 @@ export function AiPanel() {
   const setConversationStatus = useSetAtom(setConversationStatusAtom)
   const appendConversationMessage = useSetAtom(appendConversationMessageAtom)
   const replaceConversationSeed = useSetAtom(replaceConversationSeedAtom)
+  const upsertConversationMessage = useSetAtom(upsertConversationMessageAtom)
   const addStudyNote = useSetAtom(addStudyNoteAtom)
   const [question, setQuestion] = useState('')
   const [noteDraft, setNoteDraft] = useState('')
@@ -72,24 +74,45 @@ export function AiPanel() {
 
       try {
         const sourceText = selectedNode.reference?.excerpt?.trim() || workspace.sourceText
-        const nextExplanation = await explainNode({
-          title: selectedNode.title,
-          summary: selectedNode.summary,
-          sourceText,
-          question: trimmedQuestion || undefined,
-          history: userMessage
-            ? [...(workspace.conversations[nodeId]?.messages ?? []), userMessage]
-            : workspace.conversations[nodeId]?.messages,
-        })
+        const assistantMessageId = createMessageId('assistant')
+        const assistantMessageCreatedAt = new Date().toISOString()
+        const nextExplanation = await streamExplainNode(
+          {
+            title: selectedNode.title,
+            summary: selectedNode.summary,
+            sourceText,
+            question: trimmedQuestion || undefined,
+            history: userMessage
+              ? [...(workspace.conversations[nodeId]?.messages ?? []), userMessage]
+              : workspace.conversations[nodeId]?.messages,
+          },
+          {
+            onDelta: (content) => {
+              if (trimmedQuestion) {
+                upsertConversationMessage({
+                  nodeId,
+                  message: {
+                    id: assistantMessageId,
+                    role: 'assistant',
+                    content,
+                    createdAt: assistantMessageCreatedAt,
+                  },
+                })
+              } else {
+                replaceConversationSeed({ nodeId, content })
+              }
+            },
+          },
+        )
 
         if (trimmedQuestion) {
-          appendConversationMessage({
+          upsertConversationMessage({
             nodeId,
             message: {
-              id: createMessageId('assistant'),
+              id: assistantMessageId,
               role: 'assistant',
               content: nextExplanation,
-              createdAt: new Date().toISOString(),
+              createdAt: assistantMessageCreatedAt,
             },
           })
         } else {
@@ -105,7 +128,14 @@ export function AiPanel() {
         })
       }
     },
-    [workspace, selectedNode, appendConversationMessage, setConversationStatus, replaceConversationSeed],
+    [
+      workspace,
+      selectedNode,
+      appendConversationMessage,
+      setConversationStatus,
+      replaceConversationSeed,
+      upsertConversationMessage,
+    ],
   )
 
   useEffect(() => {
