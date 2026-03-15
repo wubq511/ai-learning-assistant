@@ -52,6 +52,7 @@ export async function streamExplainNode(
   payload: ExplainNodePayload,
   options?: {
     onDelta?: (content: string, delta: string) => void
+    signal?: AbortSignal
   },
 ) {
   const bridge = getLearningAssistantBridge()
@@ -59,6 +60,18 @@ export async function streamExplainNode(
 
   return new Promise<string>((resolve, reject) => {
     let currentContent = ''
+    let settled = false
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      cleanup()
+      options?.signal?.removeEventListener('abort', handleAbort)
+      callback()
+    }
+
     const cleanup = bridge.onExplainNodeStreamEvent((event) => {
       if (event.requestId !== requestId) {
         return
@@ -71,16 +84,28 @@ export async function streamExplainNode(
       }
 
       if (event.type === 'done') {
-        cleanup()
-        resolve(event.content ?? currentContent)
+        finish(() => resolve(event.content ?? currentContent))
         return
       }
 
       if (event.type === 'error') {
-        cleanup()
-        reject(new Error(event.error ?? 'AI 流式请求失败。'))
+        finish(() => reject(new Error(event.error ?? 'AI 流式请求失败。')))
       }
     })
+
+    const handleAbort = () => {
+      void bridge.cancelExplainNodeStream(requestId)
+      finish(() => reject(new Error('已取消当前 AI 回复。')))
+    }
+
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        handleAbort()
+        return
+      }
+
+      options.signal.addEventListener('abort', handleAbort, { once: true })
+    }
 
     void bridge
       .streamExplainNode({
@@ -91,8 +116,7 @@ export async function streamExplainNode(
         question: createQuestionPayload(payload.question, payload.history),
       })
       .catch((error) => {
-        cleanup()
-        reject(error instanceof Error ? error : new Error('AI 流式请求失败。'))
+        finish(() => reject(error instanceof Error ? error : new Error('AI 流式请求失败。')))
       })
   })
 }
