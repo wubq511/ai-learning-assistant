@@ -230,10 +230,16 @@ export function Home() {
             <h2>阅读并分析 PDF</h2>
           </div>
           <p>导入教科书或幻灯片。工作区会将文档页面链接到映射的知识节点。</p>
-          <div className="pdf-status" role="status">
+          <div className={`status-chip ${pdfStatus.includes('失败') || pdfStatus.includes('错误') ? 'status-chip--error' : pdfStatus.includes('已导入') ? 'status-chip--success' : ''}`} role="status">
             {pdfStatus}
           </div>
           <button className="secondary-button" type="button" onClick={handleOpenPdf} disabled={isPdfLoading}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7 }}>
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="12" y1="18" x2="12" y2="12"/>
+              <line x1="9" y1="15" x2="15" y2="15"/>
+            </svg>
             {isPdfLoading ? '正在导入...' : '浏览 PDF'}
           </button>
         </article>
@@ -279,8 +285,10 @@ export function Home() {
           </div>
           <div className="status-row">
             <div className="status-row__meta">
-              <span className="pdf-status">{configStatus}</span>
-              {hasConfiguredAi ? <span className="page-chip">已存在可用密钥</span> : null}
+              <span className={`status-chip ${configStatus.includes('失败') || configStatus.includes('错误') ? 'status-chip--error' : configStatus.includes('保存') || configStatus.includes('检测到') || configStatus.includes('成功') ? 'status-chip--success' : ''}`}>
+                {configStatus}
+              </span>
+              {hasConfiguredAi ? <span className="status-chip status-chip--success">已存在可用密钥</span> : null}
             </div>
             <div className="status-row__actions">
               <button className="ghost-button" type="button" onClick={handleTestConfig} disabled={isSavingConfig || isTestingConfig}>
@@ -299,7 +307,7 @@ export function Home() {
             <h2>已保存工作区</h2>
           </div>
           <p>继续之前的学习现场，恢复节点、页码、AI 对话与会话内学习笔记。</p>
-          {workspaceStatus ? <div className="pdf-status">{workspaceStatus}</div> : null}
+          {workspaceStatus ? <div className={`status-chip ${workspaceStatus.includes('失败') ? 'status-chip--error' : workspaceStatus.includes('已') ? 'status-chip--success' : ''}`}>{workspaceStatus}</div> : null}
           <div className="workspace-history-list" aria-label="已保存工作区列表">
             {workspaceHistory.length === 0 ? (
               <div className="study-note-list__empty">当前还没有历史工作区。开始一次学习后会自动保存到这里。</div>
