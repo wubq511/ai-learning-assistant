@@ -1,4 +1,12 @@
+import type { PersistedWorkspaceModel } from './workspacePersistence'
+import type { WorkspaceSummary } from '../types/workspace'
+
 const previewPdfFiles = new Map<string, string>()
+const previewWorkspaces = new Map<string, PersistedWorkspaceModel>()
+const previewStreamTimers = new Map<string, number>()
+const previewStreamListeners = new Set<
+  (event: { requestId: string; type: 'delta' | 'done' | 'error'; delta?: string; content?: string; error?: string }) => void
+>()
 
 function readFileAsBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -78,6 +86,13 @@ function createFallbackBridge() {
       model: payload.model ?? 'gpt-4o-mini',
       configured: Boolean(payload.apiKey),
     }),
+    testConfigConnection: async (payload: { apiKey?: string; baseURL?: string; model?: string }) => ({
+      connected: Boolean(payload.apiKey),
+      configured: Boolean(payload.apiKey),
+      baseURL: payload.baseURL ?? '',
+      model: payload.model ?? 'gpt-4o-mini',
+      message: payload.apiKey ? '预览模式下已跳过真实连接测试。' : '预览模式下缺少 API Key。',
+    }),
     openPdf: async () => selectPreviewPdf(),
     readPdfFile: async (path: string) => {
       const data = previewPdfFiles.get(path)
@@ -86,6 +101,95 @@ function createFallbackBridge() {
       }
 
       return { data }
+    },
+    listWorkspaces: async (): Promise<WorkspaceSummary[]> =>
+      [...previewWorkspaces.values()]
+        .map((workspace) => ({
+          id: workspace.id,
+          title: workspace.title,
+          sourceType: workspace.sourceType,
+          createdAt: workspace.createdAt,
+          updatedAt: workspace.updatedAt,
+          noteCount: workspace.studyNotes.length,
+          nodeCount: workspace.nodes.length,
+          selectedNodeTitle:
+            workspace.nodes.find((node) => node.id === workspace.selectedNodeId)?.title ?? workspace.nodes[0]?.title ?? workspace.title,
+          hasPdfDocument: Boolean(workspace.pdfDocument),
+        }))
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    saveWorkspace: async (workspace: PersistedWorkspaceModel) => {
+      previewWorkspaces.set(workspace.id, workspace)
+      return createFallbackBridge().listWorkspaces()
+    },
+    loadWorkspace: async (workspaceId: string) => previewWorkspaces.get(workspaceId) ?? null,
+    deleteWorkspace: async (workspaceId: string) => {
+      previewWorkspaces.delete(workspaceId)
+      return createFallbackBridge().listWorkspaces()
+    },
+    streamExplainNode: async (payload: { requestId: string; title: string; summary: string; question?: string }) => {
+      const fullContent = buildPreviewExplanation(payload)
+      const chunks = fullContent.match(/.{1,24}/gu) ?? [fullContent]
+      let currentContent = ''
+      let index = 0
+
+      const tick = () => {
+        const nextChunk = chunks[index]
+        if (!nextChunk) {
+          previewStreamListeners.forEach((listener) =>
+            listener({
+              requestId: payload.requestId,
+              type: 'done',
+              content: currentContent,
+            }),
+          )
+          previewStreamTimers.delete(payload.requestId)
+          return
+        }
+
+        currentContent += nextChunk
+        previewStreamListeners.forEach((listener) =>
+          listener({
+            requestId: payload.requestId,
+            type: 'delta',
+            delta: nextChunk,
+            content: currentContent,
+          }),
+        )
+
+        index += 1
+        const timer = window.setTimeout(tick, 30)
+        previewStreamTimers.set(payload.requestId, timer)
+      }
+
+      const timer = window.setTimeout(tick, 10)
+      previewStreamTimers.set(payload.requestId, timer)
+
+      return { started: true }
+    },
+    cancelExplainNodeStream: async (requestId: string) => {
+      const timer = previewStreamTimers.get(requestId)
+      if (timer) {
+        window.clearTimeout(timer)
+        previewStreamTimers.delete(requestId)
+      }
+
+      previewStreamListeners.forEach((listener) =>
+        listener({
+          requestId,
+          type: 'error',
+          error: '已取消当前 AI 回复。',
+        }),
+      )
+
+      return { cancelled: Boolean(timer) }
+    },
+    onExplainNodeStreamEvent: (
+      callback: (event: { requestId: string; type: 'delta' | 'done' | 'error'; delta?: string; content?: string; error?: string }) => void,
+    ) => {
+      previewStreamListeners.add(callback)
+      return () => {
+        previewStreamListeners.delete(callback)
+      }
     },
     explainNode: async (payload: { title: string; summary: string; question?: string }) => ({
       content: buildPreviewExplanation(payload),

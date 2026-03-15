@@ -9,7 +9,7 @@ const { explainNodeMock } = vi.hoisted(() => ({
 }))
 
 vi.mock('../services/aiService', () => ({
-  explainNode: explainNodeMock,
+  streamExplainNode: explainNodeMock,
 }))
 
 describe('AiPanel', () => {
@@ -86,6 +86,7 @@ describe('AiPanel', () => {
           expect.objectContaining({ role: 'user', content: '它为什么成立？' }),
         ]),
       }),
+      expect.objectContaining({ onDelta: expect.any(Function) }),
     )
   })
 

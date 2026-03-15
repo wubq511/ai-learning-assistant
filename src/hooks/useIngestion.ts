@@ -1,6 +1,7 @@
 import { useSetAtom } from 'jotai'
 import { buildWorkspace } from '../services/workspaceBuilder'
-import { screenAtom, workspaceAtom } from '../store/appStore'
+import { getLearningAssistantBridge } from '../services/learningAssistantBridge'
+import { screenAtom, setWorkspaceAtom } from '../store/appStore'
 
 function deriveNotesTitle(notes: string) {
   const firstLine = notes
@@ -26,7 +27,7 @@ function deriveNotesTitle(notes: string) {
 }
 
 export function useIngestion() {
-  const setWorkspace = useSetAtom(workspaceAtom)
+  const setWorkspace = useSetAtom(setWorkspaceAtom)
   const setScreen = useSetAtom(screenAtom)
 
   function openWorkspace() {
@@ -59,7 +60,7 @@ export function useIngestion() {
 
   async function startPdfSession(file: { path: string; name: string }) {
     const { base64ToUint8Array, extractPdfMetadata } = await import('../services/pdfMetadata')
-    const encoded = await window.learningAssistant.readPdfFile(file.path)
+    const encoded = await getLearningAssistantBridge().readPdfFile(file.path)
     const data = base64ToUint8Array(encoded.data)
     const metadata = await extractPdfMetadata(data)
     const sourceText =

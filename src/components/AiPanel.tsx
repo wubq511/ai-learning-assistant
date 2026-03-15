@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom } from 'jotai'
-import { useEffect, useCallback, useMemo, useState } from 'react'
-import { explainNode } from '../services/aiService'
+import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
+import { streamExplainNode } from '../services/aiService'
 import {
   addStudyNoteAtom,
   appendConversationMessageAtom,
@@ -9,6 +9,7 @@ import {
   selectedNodeAtom,
   selectedNodeNotesAtom,
   setConversationStatusAtom,
+  upsertConversationMessageAtom,
   workspaceAtom,
 } from '../store/appStore'
 
@@ -33,9 +34,11 @@ export function AiPanel() {
   const setConversationStatus = useSetAtom(setConversationStatusAtom)
   const appendConversationMessage = useSetAtom(appendConversationMessageAtom)
   const replaceConversationSeed = useSetAtom(replaceConversationSeedAtom)
+  const upsertConversationMessage = useSetAtom(upsertConversationMessageAtom)
   const addStudyNote = useSetAtom(addStudyNoteAtom)
   const [question, setQuestion] = useState('')
   const [noteDraft, setNoteDraft] = useState('')
+  const activeRequestAbortRef = useRef<AbortController | null>(null)
 
   const latestAssistantMessage = useMemo(
     () => [...(selectedConversation?.messages ?? [])].reverse().find((message) => message.role === 'assistant') ?? null,
@@ -50,6 +53,9 @@ export function AiPanel() {
 
       const nodeId = selectedNode.id
       const trimmedQuestion = customQuestion?.trim()
+      activeRequestAbortRef.current?.abort()
+      const requestAbortController = new AbortController()
+      activeRequestAbortRef.current = requestAbortController
 
       const userMessage =
         trimmedQuestion && trimmedQuestion.length > 0
@@ -72,24 +78,54 @@ export function AiPanel() {
 
       try {
         const sourceText = selectedNode.reference?.excerpt?.trim() || workspace.sourceText
-        const nextExplanation = await explainNode({
-          title: selectedNode.title,
-          summary: selectedNode.summary,
-          sourceText,
-          question: trimmedQuestion || undefined,
-          history: userMessage
-            ? [...(workspace.conversations[nodeId]?.messages ?? []), userMessage]
-            : workspace.conversations[nodeId]?.messages,
-        })
+        const assistantMessageId = createMessageId('assistant')
+        const assistantMessageCreatedAt = new Date().toISOString()
+        const nextExplanation = await streamExplainNode(
+          {
+            title: selectedNode.title,
+            summary: selectedNode.summary,
+            sourceText,
+            question: trimmedQuestion || undefined,
+            history: userMessage
+              ? [...(workspace.conversations[nodeId]?.messages ?? []), userMessage]
+              : workspace.conversations[nodeId]?.messages,
+          },
+          {
+            onDelta: (content) => {
+              if (activeRequestAbortRef.current !== requestAbortController) {
+                return
+              }
+
+              if (trimmedQuestion) {
+                upsertConversationMessage({
+                  nodeId,
+                  message: {
+                    id: assistantMessageId,
+                    role: 'assistant',
+                    content,
+                    createdAt: assistantMessageCreatedAt,
+                  },
+                })
+              } else {
+                replaceConversationSeed({ nodeId, content })
+              }
+            },
+            signal: requestAbortController.signal,
+          },
+        )
+
+        if (activeRequestAbortRef.current !== requestAbortController) {
+          return
+        }
 
         if (trimmedQuestion) {
-          appendConversationMessage({
+          upsertConversationMessage({
             nodeId,
             message: {
-              id: createMessageId('assistant'),
+              id: assistantMessageId,
               role: 'assistant',
               content: nextExplanation,
-              createdAt: new Date().toISOString(),
+              createdAt: assistantMessageCreatedAt,
             },
           })
         } else {
@@ -98,15 +134,40 @@ export function AiPanel() {
 
         setConversationStatus({ nodeId, status: 'idle' })
       } catch (error) {
+        if (requestAbortController.signal.aborted) {
+          if (activeRequestAbortRef.current === requestAbortController) {
+            setConversationStatus({ nodeId, status: 'idle' })
+          }
+          return
+        }
+
         setConversationStatus({
           nodeId,
           status: 'error',
           error: error instanceof Error ? error.message : 'AI 请求失败。',
         })
+      } finally {
+        if (activeRequestAbortRef.current === requestAbortController) {
+          activeRequestAbortRef.current = null
+        }
       }
     },
-    [workspace, selectedNode, appendConversationMessage, setConversationStatus, replaceConversationSeed],
+    [
+      workspace,
+      selectedNode,
+      appendConversationMessage,
+      setConversationStatus,
+      replaceConversationSeed,
+      upsertConversationMessage,
+    ],
   )
+
+  useEffect(() => {
+    return () => {
+      activeRequestAbortRef.current?.abort()
+      activeRequestAbortRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     if (!workspace || !selectedNode || !selectedConversation) {
@@ -130,6 +191,11 @@ export function AiPanel() {
     return (
       <aside className="workspace-panel workspace-panel--ai">
         <div className="panel-empty-state">
+          <div className="panel-empty-state__icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
           <h2>AI 讲解区</h2>
           <p>进入学习主题后，这里会保留节点讲解、追问历史与会话内学习笔记。</p>
         </div>
@@ -161,6 +227,11 @@ export function AiPanel() {
             {selectedConversation?.status === 'loading' ? <span className="page-chip">AI 思考中</span> : null}
           </div>
           <div className="conversation-list" role="log" aria-label="AI 对话历史">
+            {(selectedConversation?.messages ?? []).length === 0 && selectedConversation?.status !== 'loading' ? (
+              <div className="study-note-list__empty" style={{ padding: '1rem', borderStyle: 'dashed' }}>
+                还没有对话历史，可以从下方输入框提问。
+              </div>
+            ) : null}
             {(selectedConversation?.messages ?? []).map((message) => (
               <article
                 key={message.id}
@@ -261,6 +332,10 @@ export function AiPanel() {
             setQuestion('')
           }}
         >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
           发送问题
         </button>
       </div>

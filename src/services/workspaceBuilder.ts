@@ -59,6 +59,10 @@ function createNodeId(prefix: string, index: number, title: string) {
   return `${prefix}-${index + 1}${slug ? `-${slug}` : ''}`
 }
 
+function createWorkspaceId(sourceType: IngestionInput['sourceType']) {
+  return `${sourceType}-workspace-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 function isGenericHeadingLabel(text: string) {
   return /^(定义|定理|性质|例题|证明|推论|应用|方法|总结|注意|公式|结论)$/u.test(text.trim())
 }
@@ -232,7 +236,7 @@ function buildNodesFromSections(title: string, sections: PdfSection[]): Knowledg
     id: section.id || createNodeId('pdf', index, section.title),
     title: section.title,
     summary: buildSummaryFromText(section.excerpt),
-    depth: index === 0 ? 0 : 1,
+    depth: Math.max(0, Math.min(section.level ?? (index === 0 ? 0 : 1), 3)),
     reference: {
       page: section.page,
       chapterTitle: section.title,
@@ -241,12 +245,74 @@ function buildNodesFromSections(title: string, sections: PdfSection[]): Knowledg
   }))
 }
 
+function collectKeywords(node: KnowledgeNode) {
+  const text = `${node.title} ${node.summary} ${node.reference?.chapterTitle ?? ''}`
+  const matches = normalizeWhitespace(text)
+    .toLowerCase()
+    .match(/[\p{L}\p{N}=+/^*-]{2,}/gu)
+
+  return new Set((matches ?? []).filter((keyword) => keyword.length >= 2))
+}
+
+function inferRelationLabel(node: KnowledgeNode) {
+  const title = node.title.trim()
+  if (/^(定义|概念)/u.test(title)) {
+    return '定义'
+  }
+
+  if (/^(定理|性质|命题|结论)/u.test(title)) {
+    return '结论'
+  }
+
+  if (/^(证明|推导)/u.test(title)) {
+    return '证明'
+  }
+
+  if (/^(应用|例题|例|方法|步骤)/u.test(title)) {
+    return '应用'
+  }
+
+  return '关联'
+}
+
+function createSemanticEdges(nodes: KnowledgeNode[]) {
+  const edges: KnowledgeEdge[] = []
+
+  for (let index = 1; index < nodes.length; index += 1) {
+    const node = nodes[index]
+    const previousNodes = nodes.slice(0, index)
+    const siblingCandidates = previousNodes.filter((candidate) => candidate.depth === node.depth)
+    const parentCandidate = [...previousNodes].reverse().find((candidate) => candidate.depth < node.depth)
+
+    if (parentCandidate) {
+      const parentLabel = inferRelationLabel(node) === '定义' ? '前置' : inferRelationLabel(node)
+      edges.push(createEdge(`edge-parent-${parentCandidate.id}-${node.id}`, parentCandidate.id, node.id, parentLabel))
+    }
+
+    const keywordSource = collectKeywords(node)
+    const relatedCandidate = [...previousNodes]
+      .reverse()
+      .find((candidate) => candidate.id !== parentCandidate?.id && [...collectKeywords(candidate)].some((keyword) => keywordSource.has(keyword)))
+
+    if (relatedCandidate) {
+      edges.push(createEdge(`edge-related-${relatedCandidate.id}-${node.id}`, relatedCandidate.id, node.id, '关联'))
+    }
+
+    const siblingCandidate = siblingCandidates[siblingCandidates.length - 1]
+    if (siblingCandidate && siblingCandidate.id !== relatedCandidate?.id) {
+      edges.push(createEdge(`edge-peer-${siblingCandidate.id}-${node.id}`, siblingCandidate.id, node.id, '并列'))
+    }
+  }
+
+  return edges
+}
+
 function buildEdges(nodes: KnowledgeNode[]): KnowledgeEdge[] {
   if (nodes.length <= 1) {
     return []
   }
 
-  return nodes.slice(1).flatMap((node, index) => {
+  const linearEdges = nodes.slice(1).flatMap((node, index) => {
     const edges: KnowledgeEdge[] = [createEdge(`edge-root-${index + 1}`, nodes[0].id, node.id, '展开')]
     const previousNode = nodes[index]
 
@@ -256,6 +322,18 @@ function buildEdges(nodes: KnowledgeNode[]): KnowledgeEdge[] {
 
     return edges
   })
+
+  const semanticEdges = createSemanticEdges(nodes)
+  const dedupedEdges = new Map<string, KnowledgeEdge>()
+
+  for (const edge of [...linearEdges, ...semanticEdges]) {
+    const key = `${edge.source}-${edge.target}-${edge.label ?? ''}`
+    if (!dedupedEdges.has(key)) {
+      dedupedEdges.set(key, edge)
+    }
+  }
+
+  return [...dedupedEdges.values()]
 }
 
 function buildConversations(nodes: KnowledgeNode[]) {
@@ -266,6 +344,7 @@ function buildConversations(nodes: KnowledgeNode[]) {
 }
 
 export function buildWorkspace(input: IngestionInput): WorkspaceModel {
+  const timestamp = new Date().toISOString()
   const nodes =
     input.sourceType === 'pdf'
       ? buildNodesFromSections(input.title, input.pdfDocument.sections)
@@ -275,7 +354,9 @@ export function buildWorkspace(input: IngestionInput): WorkspaceModel {
   const selectedNodeId = nodes[0]?.id ?? ''
 
   return {
-    id: `${input.sourceType}-${selectedNodeId || 'workspace'}`,
+    id: createWorkspaceId(input.sourceType),
+    createdAt: timestamp,
+    updatedAt: timestamp,
     sourceType: input.sourceType,
     title: input.title,
     sourceText: input.sourceText,

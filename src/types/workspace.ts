@@ -56,18 +56,21 @@ export interface PdfSection {
   title: string
   page: number
   excerpt: string
+  level?: number
 }
 
 export interface PdfDocumentState {
   name: string
   path: string
-  data: Uint8Array
+  data?: Uint8Array
   pageCount: number
   sections: PdfSection[]
 }
 
 export interface WorkspaceModel {
   id: string
+  createdAt: string
+  updatedAt: string
   sourceType: SourceType
   title: string
   sourceText: string
@@ -78,6 +81,18 @@ export interface WorkspaceModel {
   conversations: Record<string, ConversationThread>
   studyNotes: StudyNote[]
   pdfDocument?: PdfDocumentState
+}
+
+export interface WorkspaceSummary {
+  id: string
+  title: string
+  sourceType: SourceType
+  createdAt: string
+  updatedAt: string
+  noteCount: number
+  nodeCount: number
+  selectedNodeTitle: string
+  hasPdfDocument: boolean
 }
 
 export interface TopicIngestionInput {
