@@ -53,4 +53,22 @@ describe('buildWorkspace', () => {
     expect(workspace.nodes[1]?.summary).toContain('关键结论')
     expect(workspace.pdfDocument?.sections.length).toBe(2)
   })
+
+  it('infers richer graph relations beyond root expansion', () => {
+    const workspace = buildWorkspace({
+      sourceType: 'notes',
+      title: '动量守恒笔记',
+      sourceText: [
+        '定义：动量是质量与速度的乘积。',
+        '定理：系统合外力为零时总动量守恒。',
+        '证明：先取系统，再由牛顿定律推得总动量不变。',
+        '应用：碰撞问题常用动量守恒与能量守恒联立。',
+      ].join('\n'),
+    })
+
+    const labels = workspace.edges.map((edge) => edge.label)
+    expect(labels).toContain('展开')
+    expect(labels).toContain('递进')
+    expect(labels.some((label) => label === '前置' || label === '证明' || label === '应用' || label === '关联' || label === '并列')).toBe(true)
+  })
 })
